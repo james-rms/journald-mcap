@@ -12,4 +12,5 @@ Common situations include:
 * Network connectivity issues might be traced down to `dhcpd` failing to get an IP
 
 This utility exports those logs into an MCAP file, which can be merged with your robot stack recordings
-and viewed in sync in [Foxglove Studio](https://foxglove.dev/studio).
+and viewed in sync in [Foxglove Studio](https://foxglove.dev/studio). If you use [Foxglove Data Platform](https://foxglove.dev/data-platform),
+you can just upload the exported MCAP alongside your robot recordings.

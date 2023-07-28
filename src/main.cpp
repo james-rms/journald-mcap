@@ -43,10 +43,10 @@ const char *name_for_transport(Transport transport) {
   }
 }
 
-Transport transport_for_name(const char *name_data, size_t name_len) {
+Transport transport_for_name(const std::string_view& name) {
   for (int i = 0; i < _TRANSPORT_COUNT; ++i) {
     const char *candidate = name_for_transport((Transport)(i));
-    if (std::string_view(candidate) == std::string_view(name_data, name_len)) {
+    if (name == candidate) {
       return (Transport)(i);
     }
   }
@@ -145,7 +145,7 @@ Transport get_transport(sd_journal *j) {
   }
   const size_t key_start = sizeof("_TRANSPORT=") - 1;
   if (length > key_start) {
-    return transport_for_name(data + key_start, length - key_start);
+    return transport_for_name(std::string_view(data + key_start, length - key_start));
   }
   return TRANSPORT_UNKNOWN;
 }
@@ -161,9 +161,6 @@ std::string get_topic(Transport transport) {
  * @brief maps systemd priorities to foxglove.Log levels.
  * https://wiki.archlinux.org/title/Systemd/Journal#Priority_level
  * https://github.com/foxglove/schemas/blob/main/schemas/jsonschema/Log.json
- *
- * @param priority
- * @return int
  */
 int level_for_priority(const std::string &priority) {
   if (priority == "0" || priority == "1" || priority == "2") {
@@ -190,8 +187,7 @@ int level_for_priority(const std::string &priority) {
   return 0;
 }
 
-std::string serialize_json(sd_journal *j, Transport transport,
-                           uint64_t timestamp) {
+std::string serialize_json(sd_journal *j, uint64_t timestamp) {
   nlohmann::json out;
   const void *data;
   size_t length;
@@ -200,38 +196,54 @@ std::string serialize_json(sd_journal *j, Transport transport,
     for (size_t key_len = 0; key_len < length; ++key_len) {
       if (dataString[key_len] == '=') {
         std::string key(dataString, key_len);
-        std::string val =
-            std::string(dataString + key_len + 1, length - key_len - 1);
         if (length <= key_len + 1) {
           break;
         }
-        out[key] = val;
-        if (key == "MESSAGE") {
-          out["message"] = val;
-        }
-        if (key == "PRIORITY") {
-          out["level"] = level_for_priority(val);
-        }
-        if (key == "_SYSTEMD_UNIT") {
-          out["name"] = val;
-        }
-        if (key == "CODE_FILE") {
-          out["file"] = val;
-        }
-        if (key == "CODE_LINE") {
-          out["line"] = std::stoull(val);
-        }
+        out[key] = std::string(dataString + key_len + 1, length - key_len - 1);
         break;
       }
     }
   }
-  if (out.find("name") == out.end()) {
-    out["name"] == name_for_transport(transport);
-  }
+  // set timestamp
   nlohmann::json time_json;
   time_json["sec"] = timestamp / 1000000000ull;
   time_json["nsec"] = timestamp % 1000000000ull;
   out["timestamp"] = time_json;
+
+  // set message
+  auto message_it = out.find("MESSAGE");
+  if (message_it != out.end()) {
+    out["message"] = message_it.value();
+  }
+
+  // set name
+  auto name_it = out.find("_SYSTEMD_UNIT");
+  if (name_it == out.end()) {
+    name_it = out.find("_EXE");
+  }
+  if (name_it == out.end()) {
+    name_it = out.find("_TRANSPORT");
+  }
+  if (name_it != out.end()) {
+    out["name"] = name_it.value();
+  } else {
+    out["name"] = "";
+  }
+
+  // set file
+  if (auto file_it = out.find("CODE_FILE"); file_it != out.end()) {
+    out["file"] = file_it.value();
+  }
+  // set line
+  if (auto line_it = out.find("CODE_LINE"); line_it != out.end()) {
+    out["line"] = line_it.value();
+  }
+  // set level
+  if (auto priority_it = out.find("PRIORITY"); priority_it != out.end()) {
+    out["level"] = level_for_priority(priority_it.value());
+  } else {
+    out["level"] = 0;
+  }
   return out.dump();
 }
 
@@ -259,10 +271,9 @@ int main(int argc, char **argv) {
     char boot_id_match_str[8 + 1 + 32 + 1] = {0};
     snprintf(boot_id_match_str, sizeof(boot_id_match_str),
              "_BOOT_ID=" SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(boot_id));
-    printf("boot id match string is %s\n", boot_id_match_str);
     err = sd_journal_add_match(j, boot_id_match_str, 0);
     if (err != 0) {
-      perror("failed to match boot ID");
+      perror("failed to add boot ID match");
       return err;
     }
     err = sd_journal_seek_head(j);
@@ -305,7 +316,7 @@ int main(int argc, char **argv) {
     message.sequence = sequence_counts[transport];
     sequence_counts[transport]++;
     message.channelId = transport_channel_ids[transport];
-    std::string json = serialize_json(j, transport, ts);
+    std::string json = serialize_json(j, ts);
     message.data = (const std::byte *)(json.c_str());
     message.dataSize = json.size();
     auto res = writer.write(message);
