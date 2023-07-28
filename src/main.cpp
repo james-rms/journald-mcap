@@ -1,6 +1,5 @@
 #include <sstream>
 #include <string_view>
-#include <unordered_map>
 
 #include <systemd/sd-id128.h>
 #include <systemd/sd-journal.h>
@@ -253,7 +252,6 @@ int main(int argc, char **argv) {
   mcap::McapWriter writer;
   mcap::Message message;
   mcap::Channel channel;
-  std::unordered_map<uint32_t, uint32_t> pid_to_channel_id;
 
   const char *output_filename = "out.mcap";
 
