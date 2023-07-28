@@ -192,17 +192,17 @@ std::string serialize_json(sd_journal *j, uint64_t timestamp) {
   const void *data;
   size_t length;
   SD_JOURNAL_FOREACH_DATA(j, data, length) {
-    const char *dataString = (const char *)data;
-    for (size_t key_len = 0; key_len < length; ++key_len) {
-      if (dataString[key_len] == '=') {
-        std::string key(dataString, key_len);
-        if (length <= key_len + 1) {
-          break;
-        }
-        out[key] = std::string(dataString + key_len + 1, length - key_len - 1);
-        break;
-      }
+    std::string_view data_view((const char*) data, length);
+    size_t eq_pos = data_view.find('=');
+    if (eq_pos == data_view.npos) {
+      continue;
     }
+    if (eq_pos >= length - 1) {
+      continue;
+    }
+    std::string_view key = data_view.substr(0, eq_pos);
+    std::string_view val = data_view.substr(eq_pos + 1, length);
+    out[std::string(key)] = std::string(val);
   }
   // set timestamp
   nlohmann::json time_json;
