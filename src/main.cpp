@@ -9,6 +9,108 @@
 
 #include "json.hpp"
 
+const char* VERSION = "0.1.0";
+
+const char* DOC = R"(
+Utility for exporting journald logs to MCAP
+
+Usage:
+  journal2mcap [-o outfile.mcap] [--start <time>] [--end <time>] [--watch]
+
+Flags:
+  -o          output filename (default is ./out.mcap)
+  --start     only export log entries starting from this unix timestamp. "now" can be provided to indicate the current time.
+  --end       only export log entries up until this unix timestamp.
+  --watch     if set, waits and continues capturing logs until SIGINT is received.
+  --help      prints this help message and exits.
+  --version   prints a version string and exits.
+
+Examples:
+
+Exports logs since boot until now:
+  journal2mcap
+
+Exports logs since boot and continues logging until Ctrl-C:
+  journal2mcap --watch
+
+Exports logs starting from now and continues logging until Ctrl-C:
+  journal2mcap --start now --watch
+
+Exports logs between from Jan 1 2023 and Feb 1 2023
+  journal2mcap --start $(date -d 2023-01-01 +%s) --end $(date -d 2023-02-01 +%s)
+
+Exports logs between from midnight Jan 1 2023 until shutdown.
+  journal2mcap --start $(date -d 2023-01-01 +%s)
+
+Exports logs from the boot before midnight Mar 1 2023 until midnight Mar 1 2023.
+  journal2mcap --end $(date -d 2023-03-01 +%s)
+)";
+
+struct Options {
+  std::string output_filename = "out.mcap";
+  uint64_t start_sec = 0;
+  uint64_t end_sec = UINT64_MAX;
+  bool watch = false;
+  bool help = false;
+  bool version = false;
+};
+
+int parse_options(int argc, char** argv, Options* options) {
+  char ** begin = argv;
+  char ** end = argv + argc;
+
+  if (auto it = std::find(begin, end, std::string_view("-o")); it != end) {
+    it++;
+    if (it == end) {
+      fprintf(stderr, "-o: a filename must be provided");
+      return 1;
+    }
+    std::string_view filename(*it);
+    if (filename.rfind("-", 0) == 0) {
+      fprintf(stderr, "-o: expected a filename, got option %s", filename.data());
+      return 1;
+    }
+    options->output_filename = filename;
+  }
+
+  if (auto it = std::find(begin, end, std::string_view("--start")); it != end) {
+    it++;
+    if (it == end) {
+      fprintf(stderr, "--start: a unix timestamp or 'now' must be provided");
+      return 1;
+    }
+    std::string start_time(*it);
+    if (start_time != "now" || (start_time.find_first_not_of("0123456789") != start_time.npos)) {
+      fprintf(stderr, "-o: expected a whole number of seconds or 'now', got %s", start_time.data());
+      return 1;
+    }
+    options->start_sec = std::stoull(start_time);
+  }
+  if (auto it = std::find(begin, end, std::string_view("--end")); it != end) {
+    it++;
+    if (it == end) {
+      fprintf(stderr, "--end: a unix timestamp must be provided");
+      return 1;
+    }
+    std::string end_time(*it);
+    if (end_time.find_first_not_of("0123456789") != end_time.npos) {
+      fprintf(stderr, "-o: expected a whole number of seconds or 'now', got %s", end_time.data());
+      return 1;
+    }
+    options->end_sec = std::stoull(end_time);
+  }
+  if (auto it = std::find(begin, end, std::string_view("--watch")); it != end) {
+    options->watch = true;
+  }
+  if (auto it = std::find(begin, end, std::string_view("--help")); it != end) {
+    options->help = true;
+  }
+  if (auto it = std::find(begin, end, std::string_view("--version")); it != end) {
+    options->version = true;
+  }
+  return 0;
+}
+
 // https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html
 enum Transport {
   TRANSPORT_UNKNOWN,
@@ -252,8 +354,18 @@ int main(int argc, char **argv) {
   mcap::McapWriter writer;
   mcap::Message message;
   mcap::Channel channel;
-
-  const char *output_filename = "out.mcap";
+  Options options;
+  if (int err = parse_options(argc, argv, &options); err != 0) {
+    return err;
+  }
+  if (options.help) {
+    printf("%s\n", DOC);
+    return 0;
+  }
+  if (options.version) {
+    printf("%s\n", VERSION);
+    return 0;
+  }
 
   {
     sd_id128_t boot_id;
@@ -282,10 +394,10 @@ int main(int argc, char **argv) {
     }
   }
   {
-    auto options = mcap::McapWriterOptions("");
-    const auto res = writer.open(output_filename, options);
+    auto writerOptions = mcap::McapWriterOptions("");
+    const auto res = writer.open(options.output_filename, writerOptions);
     if (!res.ok()) {
-      fprintf(stderr, "failed to open %s for writing: %s\n", output_filename,
+      fprintf(stderr, "open failed: %s\n",
               res.message.c_str());
       return 1;
     }
