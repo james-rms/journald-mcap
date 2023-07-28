@@ -43,7 +43,7 @@ const char *name_for_transport(Transport transport) {
   }
 }
 
-Transport transport_for_name(const std::string_view& name) {
+Transport transport_for_name(const std::string_view &name) {
   for (int i = 0; i < _TRANSPORT_COUNT; ++i) {
     const char *candidate = name_for_transport((Transport)(i));
     if (name == candidate) {
@@ -125,14 +125,16 @@ static const char *SCHEMA_TEXT = R"({
   }
 })";
 
-uint64_t get_ts(sd_journal *j) {
-  uint64_t out = 0;
-  sd_journal_get_realtime_usec(j, &out);
-  if (out >= (UINT64_MAX / 1000ull)) {
-    return out;
+int get_ts(sd_journal *j, uint64_t* out) {
+  int err = sd_journal_get_realtime_usec(j, out);
+  if (err != 0) {
+    return err;
   }
-  out *= 1000ULL;
-  return out;
+  if (*out >= (UINT64_MAX / 1000ull)) {
+    return -EINVAL;
+  }
+  *out *= 1000ULL;
+  return 0;
 }
 
 Transport get_transport(sd_journal *j) {
@@ -145,14 +147,15 @@ Transport get_transport(sd_journal *j) {
   }
   const size_t key_start = sizeof("_TRANSPORT=") - 1;
   if (length > key_start) {
-    return transport_for_name(std::string_view(data + key_start, length - key_start));
+    return transport_for_name(
+        std::string_view(data + key_start, length - key_start));
   }
   return TRANSPORT_UNKNOWN;
 }
 
 std::string get_topic(Transport transport) {
   std::stringstream ss;
-  ss << "/syslog/";
+  ss << "/journald/";
   ss << name_for_transport(transport);
   return ss.str();
 }
@@ -192,7 +195,7 @@ std::string serialize_json(sd_journal *j, uint64_t timestamp) {
   const void *data;
   size_t length;
   SD_JOURNAL_FOREACH_DATA(j, data, length) {
-    std::string_view data_view((const char*) data, length);
+    std::string_view data_view((const char *)data, length);
     size_t eq_pos = data_view.find('=');
     if (eq_pos == data_view.npos) {
       continue;
@@ -226,8 +229,6 @@ std::string serialize_json(sd_journal *j, uint64_t timestamp) {
   }
   if (name_it != out.end()) {
     out["name"] = name_it.value();
-  } else {
-    out["name"] = "";
   }
 
   // set file
@@ -309,7 +310,12 @@ int main(int argc, char **argv) {
   }
 
   while (sd_journal_next(j) > 0) {
-    uint64_t ts = get_ts(j);
+    uint64_t ts = 0;
+    int err = get_ts(j, &ts);
+    if (err != 0) {
+      perror("failed to read entry timestamp");
+      return err;
+    }
     message.logTime = ts;
     message.publishTime = ts;
     Transport transport = get_transport(j);
