@@ -18,12 +18,12 @@ Usage:
   journal2mcap [-o outfile.mcap] [--start <time>] [--end <time>] [--watch]
 
 Flags:
-  -o          output filename (default is ./out.mcap)
-  --start     only export log entries starting from this unix timestamp. "now" can be provided to indicate the current time.
-  --end       only export log entries up until this unix timestamp.
-  --watch     if set, waits and continues capturing logs until SIGINT is received.
-  --help      prints this help message and exits.
-  --version   prints a version string and exits.
+  -o  --output    output filename (default is ./out.mcap)
+  -s  --start     only export log entries starting from this unix timestamp. "now" can be provided to indicate the current time.
+  -e  --end       only export log entries up until this unix timestamp.
+  -w  --watch     if set, waits and continues capturing logs until SIGINT is received.
+  -h  --help      prints this help message and exits.
+  --version       prints a version string and exits.
 
 Examples:
 
@@ -108,7 +108,7 @@ int parse_options(int argc, char **argv, Options *options) {
       break;
     case TOKEN_END:
       if (i == argc - 1 || token_of(argv[i + 1]) != TOKEN_INT) {
-        fprintf(stderr, "expected a time value after %s\n", argv[i]);
+        fprintf(stderr, "expected integer seconds after %s\n", argv[i]);
         return 1;
       }
       options->end_sec = std::stoull(std::string(argv[i + 1]));
@@ -117,7 +117,7 @@ int parse_options(int argc, char **argv, Options *options) {
       break;
     case TOKEN_START:
       if (i == argc - 1) {
-        fprintf(stderr, "expected a time value after %s\n", argv[i]);
+        fprintf(stderr, "expected another argument after %s\n", argv[i]);
         return 1;
       }
       if (token_of(argv[i + 1]) == TOKEN_INT) {
@@ -133,7 +133,7 @@ int parse_options(int argc, char **argv, Options *options) {
       break;
     case TOKEN_OUTPUT:
       if (i == argc - 1 || token_of(argv[i + 1]) != TOKEN_STRING) {
-        fprintf(stderr, "expected a string value after %s\n", argv[i]);
+        fprintf(stderr, "expected another argument after %s\n", argv[i]);
         return 1;
       }
       options->output_filename = std::string(argv[i + 1]);
@@ -141,7 +141,8 @@ int parse_options(int argc, char **argv, Options *options) {
       i++;
       break;
     default:
-      fprintf(stderr, "unexpected argument %s\n", argv[i]);
+      fprintf(stderr, "unexpected argument %s, see --help for usage\n",
+              argv[i]);
       return 1;
     }
   }
