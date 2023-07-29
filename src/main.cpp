@@ -9,9 +9,9 @@
 
 #include "json.hpp"
 
-const char* VERSION = "0.1.0";
+const char *VERSION = "0.1.0";
 
-const char* DOC = R"(
+const char *DOC = R"(
 Utility for exporting journald logs to MCAP
 
 Usage:
@@ -50,63 +50,100 @@ struct Options {
   std::string output_filename = "out.mcap";
   uint64_t start_sec = 0;
   uint64_t end_sec = UINT64_MAX;
+  bool start_now = false;
   bool watch = false;
   bool help = false;
   bool version = false;
 };
 
-int parse_options(int argc, char** argv, Options* options) {
-  char ** begin = argv;
-  char ** end = argv + argc;
+enum CmdlineToken {
+  TOKEN_EMPTY,
+  TOKEN_HELP,
+  TOKEN_VERSION,
+  TOKEN_START,
+  TOKEN_END,
+  TOKEN_WATCH,
+  TOKEN_OUTPUT,
+  TOKEN_INT,
+  TOKEN_NOW,
+  TOKEN_STRING,
+};
 
-  if (auto it = std::find(begin, end, std::string_view("-o")); it != end) {
-    it++;
-    if (it == end) {
-      fprintf(stderr, "-o: a filename must be provided");
-      return 1;
-    }
-    std::string_view filename(*it);
-    if (filename.rfind("-", 0) == 0) {
-      fprintf(stderr, "-o: expected a filename, got option %s", filename.data());
-      return 1;
-    }
-    options->output_filename = filename;
+CmdlineToken token_of(char *arg) {
+  std::string_view this_arg(arg);
+  if (this_arg == "-h" || this_arg == "--help") {
+    return TOKEN_HELP;
+  } else if (this_arg == "--version") {
+    return TOKEN_VERSION;
+  } else if (this_arg == "-o" || this_arg == "--output") {
+    return TOKEN_OUTPUT;
+  } else if (this_arg == "-s" || this_arg == "--start") {
+    return TOKEN_START;
+  } else if (this_arg == "-e" || this_arg == "--end") {
+    return TOKEN_END;
+  } else if (this_arg == "-w" || this_arg == "--watch") {
+    return TOKEN_WATCH;
+  } else if (this_arg == "") {
+    return TOKEN_EMPTY;
+  } else if (this_arg == "now") {
+    return TOKEN_NOW;
+  } else if (this_arg.find_first_not_of("0123456789") == this_arg.npos) {
+    return TOKEN_INT;
   }
+  return TOKEN_STRING;
+}
 
-  if (auto it = std::find(begin, end, std::string_view("--start")); it != end) {
-    it++;
-    if (it == end) {
-      fprintf(stderr, "--start: a unix timestamp or 'now' must be provided");
+int parse_options(int argc, char **argv, Options *options) {
+  std::vector<CmdlineToken> tokens;
+  for (int i = 1; i < argc; ++i) {
+    switch (token_of(argv[i])) {
+    case TOKEN_HELP:
+      options->help = true;
+      return 0;
+    case TOKEN_VERSION:
+      options->version = true;
+      return 0;
+    case TOKEN_WATCH:
+      options->watch = true;
+      break;
+    case TOKEN_END:
+      if (i == argc - 1 || token_of(argv[i + 1]) != TOKEN_INT) {
+        fprintf(stderr, "expected a time value after %s\n", argv[i]);
+        return 1;
+      }
+      options->end_sec = std::stoull(std::string(argv[i + 1]));
+      // skip past the next argument
+      i++;
+      break;
+    case TOKEN_START:
+      if (i == argc - 1) {
+        fprintf(stderr, "expected a time value after %s\n", argv[i]);
+        return 1;
+      }
+      if (token_of(argv[i + 1]) == TOKEN_INT) {
+        options->start_sec = std::stoull(std::string(argv[i + 1]));
+      } else if (token_of(argv[i + 1]) == TOKEN_NOW) {
+        options->start_now = true;
+      } else {
+        fprintf(stderr, "expected an integer or 'now' after %s\n", argv[i]);
+        return 1;
+      }
+      // skip past the next argument
+      i++;
+      break;
+    case TOKEN_OUTPUT:
+      if (i == argc - 1 || token_of(argv[i + 1]) != TOKEN_STRING) {
+        fprintf(stderr, "expected a string value after %s\n", argv[i]);
+        return 1;
+      }
+      options->output_filename = std::string(argv[i + 1]);
+      // skip past the next argument
+      i++;
+      break;
+    default:
+      fprintf(stderr, "unexpected argument %s\n", argv[i]);
       return 1;
     }
-    std::string start_time(*it);
-    if (start_time != "now" || (start_time.find_first_not_of("0123456789") != start_time.npos)) {
-      fprintf(stderr, "-o: expected a whole number of seconds or 'now', got %s", start_time.data());
-      return 1;
-    }
-    options->start_sec = std::stoull(start_time);
-  }
-  if (auto it = std::find(begin, end, std::string_view("--end")); it != end) {
-    it++;
-    if (it == end) {
-      fprintf(stderr, "--end: a unix timestamp must be provided");
-      return 1;
-    }
-    std::string end_time(*it);
-    if (end_time.find_first_not_of("0123456789") != end_time.npos) {
-      fprintf(stderr, "-o: expected a whole number of seconds or 'now', got %s", end_time.data());
-      return 1;
-    }
-    options->end_sec = std::stoull(end_time);
-  }
-  if (auto it = std::find(begin, end, std::string_view("--watch")); it != end) {
-    options->watch = true;
-  }
-  if (auto it = std::find(begin, end, std::string_view("--help")); it != end) {
-    options->help = true;
-  }
-  if (auto it = std::find(begin, end, std::string_view("--version")); it != end) {
-    options->version = true;
   }
   return 0;
 }
@@ -226,7 +263,7 @@ static const char *SCHEMA_TEXT = R"({
   }
 })";
 
-int get_ts(sd_journal *j, uint64_t* out) {
+int get_ts(sd_journal *j, uint64_t *out) {
   int err = sd_journal_get_realtime_usec(j, out);
   if (err != 0) {
     return err;
@@ -397,8 +434,7 @@ int main(int argc, char **argv) {
     auto writerOptions = mcap::McapWriterOptions("");
     const auto res = writer.open(options.output_filename, writerOptions);
     if (!res.ok()) {
-      fprintf(stderr, "open failed: %s\n",
-              res.message.c_str());
+      fprintf(stderr, "open failed: %s\n", res.message.c_str());
       return 1;
     }
   }
