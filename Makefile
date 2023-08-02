@@ -8,6 +8,6 @@ bin/tests: test/test.cpp src/cmdline.cpp src/journal.cpp test/fake_systemd.cpp
 	mkdir -p bin
 	$(CC) -o $@ $^ -Iinclude
 
-.PHONY = test
+.PHONY: test
 test: bin/tests
 	$^
