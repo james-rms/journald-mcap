@@ -55,10 +55,10 @@ int parse_options(int argc, const char **argv, Options *options) {
     switch (token_of(argv[i])) {
     case TOKEN_HELP:
       options->help = true;
-      return 0;
+      break;
     case TOKEN_VERSION:
       options->version = true;
-      return 0;
+      break;
     case TOKEN_WATCH:
       options->watch = true;
       break;
