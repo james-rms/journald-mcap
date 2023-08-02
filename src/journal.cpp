@@ -1,4 +1,3 @@
-
 #include "vendor/json.hpp"
 
 #include "journal.hpp"
@@ -136,7 +135,7 @@ std::string serialize_json(sd_journal *j, uint64_t timestamp) {
   }
   // set line
   if (auto line_it = out.find("CODE_LINE"); line_it != out.end()) {
-    out["line"] = line_it.value();
+    out["line"] = std::stoull(std::string(line_it.value()));
   }
   // set level
   if (auto priority_it = out.find("PRIORITY"); priority_it != out.end()) {

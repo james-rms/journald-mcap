@@ -2,6 +2,7 @@
 
 #define CATCH_CONFIG_MAIN
 #include "vendor/catch.hpp"
+#include "vendor/json.hpp"
 
 #include "cmdline.hpp"
 #include "journal.hpp"
@@ -102,4 +103,107 @@ TEST_CASE("return unknown for unknown transports", "[get_transport]") {
 }
 TEST_CASE("return unkown on err return from journald", "[get_transport]") {
   test_get_transport({{"_TRANSPORT", "audit"}}, 1, TRANSPORT_UNKNOWN);
+}
+
+void test_serialize_json(
+  const std::map<std::string, std::string> &base_entries,
+  const nlohmann::json& extra,
+  uint64_t timestamp
+) {
+  sd_journal j;
+  j.entries = base_entries;
+  j.rval = 0;
+  std::string res = serialize_json(&j, timestamp);
+  nlohmann::json expected(base_entries);
+  expected.merge_patch(extra);
+  REQUIRE(res == expected.dump());
+}
+
+// using namespace nlohmann::literals;
+
+TEST_CASE("with a message", "[serialize_json]") {
+  test_serialize_json({{ "MESSAGE", "foo" }}, R"({
+    "message": "foo",
+    "level": 0,
+    "timestamp": {
+      "sec": 10,
+      "nsec": 50
+    }
+  })"_json, 10000000050ull);
+}
+
+TEST_CASE("with a priority", "[serialize_json]") {
+  test_serialize_json({{ "MESSAGE", "foo" }, { "PRIORITY", "7" }}, R"({
+    "message": "foo",
+    "level": 1,
+    "timestamp": {
+      "sec": 10,
+      "nsec": 50
+    }
+  })"_json, 10000000050ull);
+}
+
+TEST_CASE("with a transport", "[serialize_json]") {
+  test_serialize_json({{ "MESSAGE", "foo" }, { "_TRANSPORT", "audit" }}, R"({
+    "message": "foo",
+    "level": 0,
+    "name": "audit",
+    "timestamp": {
+      "sec": 10,
+      "nsec": 50
+    }
+  })"_json, 10000000050ull);
+}
+
+TEST_CASE("with an executable", "[serialize_json]") {
+  test_serialize_json({
+    { "MESSAGE", "foo" },
+    { "_TRANSPORT", "audit" },
+    { "_EXE", "/usr/bin/ldd" },
+  }, R"({
+    "message": "foo",
+    "level": 0,
+    "name": "/usr/bin/ldd",
+    "timestamp": {
+      "sec": 10,
+      "nsec": 50
+    }
+  })"_json, 10000000050ull);
+}
+
+TEST_CASE("with a systemd unit", "[serialize_json]") {
+  test_serialize_json({
+    { "MESSAGE", "foo" },
+    { "_TRANSPORT", "audit" },
+    { "_EXE", "/usr/bin/ldd" },
+    { "_SYSTEMD_UNIT", "ldd.service" },
+  }, R"({
+    "message": "foo",
+    "level": 0,
+    "name": "ldd.service",
+    "timestamp": {
+      "sec": 10,
+      "nsec": 50
+    }
+  })"_json, 10000000050ull);
+}
+
+
+TEST_CASE("sets debug file info", "[serialize_json]") {
+  test_serialize_json({
+    { "MESSAGE", "foo" },
+    { "_SYSTEMD_UNIT", "ldd.service" },
+    { "CODE_FILE", "main.cpp" },
+    { "CODE_LINE", "99" },
+  }, R"({
+    "message": "foo",
+    "level": 0,
+    "name": "ldd.service",
+    "file": "main.cpp",
+    "line": 99,
+    "timestamp": {
+      "sec": 10,
+      "nsec": 50
+    }
+  })"_json, 10000000050ull);
 }
