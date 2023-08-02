@@ -1,7 +1,5 @@
 #include <cassert>
 #include <string_view>
-#include <vector>
-
 #include "cmdline.hpp"
 
 enum CmdlineToken {
@@ -43,7 +41,6 @@ CmdlineToken token_of(const char *arg) {
 
 int parse_options(int argc, const char **argv, Options *options) {
   assert(options != NULL);
-  std::vector<CmdlineToken> tokens;
   for (int i = 1; i < argc; ++i) {
     switch (token_of(argv[i])) {
     case TOKEN_HELP:
@@ -57,7 +54,7 @@ int parse_options(int argc, const char **argv, Options *options) {
       break;
     case TOKEN_END:
       if (i == argc - 1 || token_of(argv[i + 1]) != TOKEN_INT) {
-        fprintf(stderr, "expected integer seconds after %s\n", argv[i]);
+        fprintf(stderr, "expected an integer after %s\n", argv[i]);
         return 1;
       }
       options->end_sec = std::stoull(std::string(argv[i + 1]));
@@ -66,7 +63,7 @@ int parse_options(int argc, const char **argv, Options *options) {
       break;
     case TOKEN_START:
       if (i == argc - 1) {
-        fprintf(stderr, "expected another argument after %s\n", argv[i]);
+        fprintf(stderr, "expected an integer or 'now' after %s\n", argv[i]);
         return 1;
       }
       if (token_of(argv[i + 1]) == TOKEN_INT) {
@@ -82,7 +79,7 @@ int parse_options(int argc, const char **argv, Options *options) {
       break;
     case TOKEN_OUTPUT:
       if (i == argc - 1 || token_of(argv[i + 1]) != TOKEN_STRING) {
-        fprintf(stderr, "expected another argument after %s\n", argv[i]);
+        fprintf(stderr, "expected a filename after %s\n", argv[i]);
         return 1;
       }
       options->output_filename = std::string(argv[i + 1]);
