@@ -1,7 +1,7 @@
 #include <utility>
 
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "vendor/catch.hpp"
 
 #include "cmdline.hpp"
 #include "journal.hpp"
