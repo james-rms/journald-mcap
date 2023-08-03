@@ -1,6 +1,10 @@
+#ifndef JOURNAL_HPP
+#define JOURNAL_HPP
 #include <string>
 
 #include <systemd/sd-journal.h>
+
+#include "cmdline.hpp"
 
 // https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html
 enum Transport {
@@ -29,3 +33,11 @@ int get_ts(sd_journal *j, uint64_t *out);
 int level_for_priority(const std::string &priority);
 
 std::string serialize_json(sd_journal *j, uint64_t timestamp);
+
+int apply_boot_id_match(sd_journal *j, const Options& options);
+
+int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_secs);
+
+int next_journal_entry(sd_journal* j, TimePoint end, uint64_t end_secs);
+
+#endif

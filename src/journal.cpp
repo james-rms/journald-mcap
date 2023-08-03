@@ -145,3 +145,13 @@ std::string serialize_json(sd_journal *j, uint64_t timestamp) {
   }
   return out.dump();
 }
+
+int apply_boot_id_match(sd_journal *j, const Options &options) { return 0; }
+
+int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_secs) {
+  return 0;
+}
+
+int next_journal_entry(sd_journal *j, TimePoint end, uint64_t end_secs) {
+  return 0;
+}

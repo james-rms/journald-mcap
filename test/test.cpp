@@ -18,13 +18,13 @@ void test_options(std::vector<const char *> args,
     // do not assert on options if expected rval is nonzero
     return;
   }
+  REQUIRE(options.end == expected_options.end);
   REQUIRE(options.end_sec == expected_options.end_sec);
+  REQUIRE(options.start == expected_options.start);
   REQUIRE(options.start_sec == expected_options.start_sec);
   REQUIRE(options.version == expected_options.version);
   REQUIRE(options.help == expected_options.help);
-  REQUIRE(options.start_now == expected_options.start_now);
   REQUIRE(options.output_filename == expected_options.output_filename);
-  REQUIRE(options.watch == expected_options.watch);
 }
 
 TEST_CASE("empty", "[cmdline]") { test_options({"exe"}, Options{}, 0); }
@@ -44,22 +44,28 @@ TEST_CASE("not an integer", "[cmdline]") {
   test_options({"exe", "--start", "wubbus"}, Options{}, 1);
 }
 TEST_CASE("parses integers", "[cmdline]") {
-  test_options({"exe", "--start", "12345"}, Options{.start_sec = 12345}, 0);
+  test_options({"exe", "--start", "12345"},
+               Options{.start = TIME_UNIX, .start_sec = 12345}, 0);
 }
 TEST_CASE("starts now", "[cmdline]") {
-  test_options({"exe", "--start", "now"}, Options{.start_now = true}, 0);
+  test_options({"exe", "--start", "now"}, Options{.start = TIME_NOW}, 0);
 }
 TEST_CASE("end at integer", "[cmdline]") {
-  test_options({"exe", "--end", "12345"}, Options{.end_sec = 12345}, 0);
+  test_options({"exe", "--end", "12345"},
+               Options{.end = TIME_UNIX, .end_sec = 12345}, 0);
 }
 TEST_CASE("set flag with and without argument", "[cmdline]") {
-  test_options({"exe", "--start", "12345", "--watch"},
-               Options{.start_sec = 12345, .watch = true}, 0);
+  test_options({"exe", "--start", "12345", "--version"},
+               Options{.start = TIME_UNIX, .start_sec = 12345, .version = true},
+               0);
 }
 TEST_CASE("set string and int flag", "[cmdline]") {
   test_options(
-      {"exe", "--output", "123.mcap", "--start", "12345", "--watch"},
-      Options{.output_filename = "123.mcap", .start_sec = 12345, .watch = true},
+      {"exe", "--output", "123.mcap", "--start", "12345", "--end", "wait"},
+      Options{.output_filename = "123.mcap",
+              .start = TIME_UNIX,
+              .start_sec = 12345,
+              .end = TIME_WAIT},
       0);
 }
 
@@ -105,11 +111,8 @@ TEST_CASE("return unkown on err return from journald", "[get_transport]") {
   test_get_transport({{"_TRANSPORT", "audit"}}, 1, TRANSPORT_UNKNOWN);
 }
 
-void test_serialize_json(
-  const std::map<std::string, std::string> &base_entries,
-  const nlohmann::json& extra,
-  uint64_t timestamp
-) {
+void test_serialize_json(const std::map<std::string, std::string> &base_entries,
+                         const nlohmann::json &extra, uint64_t timestamp) {
   sd_journal j;
   j.entries = base_entries;
   j.rval = 0;
@@ -122,29 +125,31 @@ void test_serialize_json(
 // using namespace nlohmann::literals;
 
 TEST_CASE("with a message", "[serialize_json]") {
-  test_serialize_json({{ "MESSAGE", "foo" }}, R"({
+  test_serialize_json({{"MESSAGE", "foo"}}, R"({
     "message": "foo",
     "level": 0,
     "timestamp": {
       "sec": 10,
       "nsec": 50
     }
-  })"_json, 10000000050ull);
+  })"_json,
+                      10000000050ull);
 }
 
 TEST_CASE("with a priority", "[serialize_json]") {
-  test_serialize_json({{ "MESSAGE", "foo" }, { "PRIORITY", "7" }}, R"({
+  test_serialize_json({{"MESSAGE", "foo"}, {"PRIORITY", "7"}}, R"({
     "message": "foo",
     "level": 1,
     "timestamp": {
       "sec": 10,
       "nsec": 50
     }
-  })"_json, 10000000050ull);
+  })"_json,
+                      10000000050ull);
 }
 
 TEST_CASE("with a transport", "[serialize_json]") {
-  test_serialize_json({{ "MESSAGE", "foo" }, { "_TRANSPORT", "audit" }}, R"({
+  test_serialize_json({{"MESSAGE", "foo"}, {"_TRANSPORT", "audit"}}, R"({
     "message": "foo",
     "level": 0,
     "name": "audit",
@@ -152,15 +157,18 @@ TEST_CASE("with a transport", "[serialize_json]") {
       "sec": 10,
       "nsec": 50
     }
-  })"_json, 10000000050ull);
+  })"_json,
+                      10000000050ull);
 }
 
 TEST_CASE("with an executable", "[serialize_json]") {
-  test_serialize_json({
-    { "MESSAGE", "foo" },
-    { "_TRANSPORT", "audit" },
-    { "_EXE", "/usr/bin/ldd" },
-  }, R"({
+  test_serialize_json(
+      {
+          {"MESSAGE", "foo"},
+          {"_TRANSPORT", "audit"},
+          {"_EXE", "/usr/bin/ldd"},
+      },
+      R"({
     "message": "foo",
     "level": 0,
     "name": "/usr/bin/ldd",
@@ -168,16 +176,19 @@ TEST_CASE("with an executable", "[serialize_json]") {
       "sec": 10,
       "nsec": 50
     }
-  })"_json, 10000000050ull);
+  })"_json,
+      10000000050ull);
 }
 
 TEST_CASE("with a systemd unit", "[serialize_json]") {
-  test_serialize_json({
-    { "MESSAGE", "foo" },
-    { "_TRANSPORT", "audit" },
-    { "_EXE", "/usr/bin/ldd" },
-    { "_SYSTEMD_UNIT", "ldd.service" },
-  }, R"({
+  test_serialize_json(
+      {
+          {"MESSAGE", "foo"},
+          {"_TRANSPORT", "audit"},
+          {"_EXE", "/usr/bin/ldd"},
+          {"_SYSTEMD_UNIT", "ldd.service"},
+      },
+      R"({
     "message": "foo",
     "level": 0,
     "name": "ldd.service",
@@ -185,17 +196,19 @@ TEST_CASE("with a systemd unit", "[serialize_json]") {
       "sec": 10,
       "nsec": 50
     }
-  })"_json, 10000000050ull);
+  })"_json,
+      10000000050ull);
 }
 
-
 TEST_CASE("sets debug file info", "[serialize_json]") {
-  test_serialize_json({
-    { "MESSAGE", "foo" },
-    { "_SYSTEMD_UNIT", "ldd.service" },
-    { "CODE_FILE", "main.cpp" },
-    { "CODE_LINE", "99" },
-  }, R"({
+  test_serialize_json(
+      {
+          {"MESSAGE", "foo"},
+          {"_SYSTEMD_UNIT", "ldd.service"},
+          {"CODE_FILE", "main.cpp"},
+          {"CODE_LINE", "99"},
+      },
+      R"({
     "message": "foo",
     "level": 0,
     "name": "ldd.service",
@@ -205,5 +218,6 @@ TEST_CASE("sets debug file info", "[serialize_json]") {
       "sec": 10,
       "nsec": 50
     }
-  })"_json, 10000000050ull);
+  })"_json,
+      10000000050ull);
 }

@@ -1,7 +1,6 @@
 #include <sstream>
 #include <string_view>
 
-#include <systemd/sd-id128.h>
 #include <systemd/sd-journal.h>
 
 #define MCAP_IMPLEMENTATION
@@ -16,15 +15,28 @@ const char *DOC = R"(
 Utility for exporting journald logs to MCAP
 
 Usage:
-  journal2mcap [-o outfile.mcap] [--start <time>] [--end <time>] [--watch]
+  journal2mcap [-o <filename>] [--start <arg>] [--end <arg>] [--verbose] [--help] [--version]
 
 Flags:
-  -o  --output    output filename (default is ./out.mcap)
-  -s  --start     only export log entries starting from this unix timestamp. "now" can be provided to indicate the current time.
-  -e  --end       only export log entries up until this unix timestamp.
-  -w  --watch     if set, waits and continues capturing logs until SIGINT is received.
-  -h  --help      prints this help message and exits.
-  --version       prints a version string and exits.
+  -o  --output
+    Output filename (default is 'out.mcap')
+  -s  --start <timestamp> | now | boot
+    Specify a start point for log entries (default is 'boot')
+    'boot' exports entries logged from the previous boot until the endpoint specified by --end.
+    'now' exports entries logged after program start.
+    <timestamp> exports entries logged after this unix timestamp.
+  -e  --end   <timestamp> | now | shutdown | wait
+    Specify an endpoint for log entries (default is 'now')
+    'now' exports entries logged before program start
+    'shutdown' exports entries from the endpoint specified by --start until the next shutdown.
+    'wait' continues exporting entries logged after program start until interrupted.
+    <timestamp> exports entries logged before this unix timestamp.
+  -v  --verbose
+    Prints info about what entries are captured while running.
+  -h  --help
+    Prints this help message and exits.
+  --version
+    prints a version string and exits.
 
 Examples:
 
@@ -32,16 +44,16 @@ Exports logs since boot until now:
   journal2mcap
 
 Exports logs since boot and continues logging until Ctrl-C:
-  journal2mcap --watch
+  journal2mcap --end wait
 
 Exports logs starting from now and continues logging until Ctrl-C:
-  journal2mcap --start now --watch
+  journal2mcap --start now --end wait
 
 Exports logs between from Jan 1 2023 and Feb 1 2023
   journal2mcap --start $(date -d 2023-01-01 +%s) --end $(date -d 2023-02-01 +%s)
 
 Exports logs between from midnight Jan 1 2023 until shutdown.
-  journal2mcap --start $(date -d 2023-01-01 +%s)
+  journal2mcap --start $(date -d 2023-01-01 +%s) --end shutdown
 
 Exports logs from the boot before midnight Mar 1 2023 until midnight Mar 1 2023.
   journal2mcap --end $(date -d 2023-03-01 +%s)
@@ -144,30 +156,20 @@ int main(int argc, const char **argv) {
     return 0;
   }
 
+  // seek to where recording will start
   {
-    sd_id128_t boot_id;
-    int err = sd_id128_get_boot(&boot_id);
+    int err = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
     if (err != 0) {
-      perror("failed to get boot ID");
-      return err;
+      fprintf(stderr, "failed to open journal: %s\n", strerror(-err));
+      return -err;
     }
-    err = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
+    err = apply_boot_id_match(j, options);
     if (err != 0) {
-      perror("failed to open journal");
-      return err;
+      return -err;
     }
-    char boot_id_match_str[8 + 1 + 32 + 1] = {0};
-    snprintf(boot_id_match_str, sizeof(boot_id_match_str),
-             "_BOOT_ID=" SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(boot_id));
-    err = sd_journal_add_match(j, boot_id_match_str, 0);
+    err = seek_to_start(j, options.start, options.start_sec);
     if (err != 0) {
-      perror("failed to add boot ID match");
-      return err;
-    }
-    err = sd_journal_seek_head(j);
-    if (err != 0) {
-      perror("failed to seek to beginning");
-      return err;
+      return -err;
     }
   }
   {
@@ -195,12 +197,13 @@ int main(int argc, const char **argv) {
     transport_channel_ids[i] = channel.id;
   }
 
-  while (sd_journal_next(j) > 0) {
+  int err = next_journal_entry(j, options.end, options.end_sec);
+  while (err > 0) {
     uint64_t ts = 0;
-    int err = get_ts(j, &ts);
+    err = get_ts(j, &ts);
     if (err != 0) {
-      perror("failed to read entry timestamp");
-      return err;
+      fprintf(stderr, "failed to read entry timestamp: %s\n", strerror(-err));
+      return -err;
     }
     message.logTime = ts;
     message.publishTime = ts;
@@ -217,6 +220,11 @@ int main(int argc, const char **argv) {
       writer.close();
       return 1;
     }
+    err = next_journal_entry(j, options.end, options.end_sec);
+  }
+  if (err < 0) {
+    fprintf(stderr, "failed to read next entry: %s", strerror(-err));
+    return -err;
   }
   writer.close();
   sd_journal_close(j);
