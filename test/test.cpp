@@ -72,7 +72,7 @@ TEST_CASE("set string and int flag", "[cmdline]") {
 void test_get_ts(uint64_t expected, uint64_t actual_usec, int journald_rval,
                  int expected_rval) {
   sd_journal j;
-  j.usec = actual_usec;
+  j.entry_timestamps = { actual_usec };
   j.rval = journald_rval;
   uint64_t out = 0;
   REQUIRE(get_ts(&j, &out) == expected_rval);
@@ -90,11 +90,11 @@ TEST_CASE("fails on very large microseconds rval", "[journal]") {
   test_get_ts(0, UINT64_MAX / 500, 0, -ERANGE);
 }
 
-void test_get_transport(const std::map<std::string, std::string> &entries,
+void test_get_transport(const std::map<std::string, std::string> &fields,
                         int journald_rval, Transport expected) {
   sd_journal j;
   j.rval = journald_rval;
-  j.entries = entries;
+  j.fields = fields;
   REQUIRE(get_transport(&j) == expected);
 }
 
@@ -111,13 +111,13 @@ TEST_CASE("return unkown on err return from journald", "[get_transport]") {
   test_get_transport({{"_TRANSPORT", "audit"}}, 1, TRANSPORT_UNKNOWN);
 }
 
-void test_serialize_json(const std::map<std::string, std::string> &base_entries,
+void test_serialize_json(const std::map<std::string, std::string> &base_fields,
                          const nlohmann::json &extra, uint64_t timestamp) {
   sd_journal j;
-  j.entries = base_entries;
+  j.fields = base_fields;
   j.rval = 0;
   std::string res = serialize_json(&j, timestamp);
-  nlohmann::json expected(base_entries);
+  nlohmann::json expected(base_fields);
   expected.merge_patch(extra);
   REQUIRE(res == expected.dump());
 }

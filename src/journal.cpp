@@ -1,5 +1,8 @@
 #include "vendor/json.hpp"
 
+
+#include <systemd/sd-id128.h>
+
 #include "journal.hpp"
 
 const char *name_for_transport(Transport transport) {
@@ -146,12 +149,131 @@ std::string serialize_json(sd_journal *j, uint64_t timestamp) {
   return out.dump();
 }
 
-int apply_boot_id_match(sd_journal *j, const Options &options) { return 0; }
+int match_current_entry_boot_id(sd_journal *j) {
+  const void* data = NULL;
+  size_t length = 0;
+  int err = sd_journal_get_data(j, "_BOOT_ID", &data, &length);
+  if (err != 0) {
+    return err;
+  }
+  return sd_journal_add_match(j, data, length);
+}
 
-int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_secs) {
+int apply_boot_id_match(sd_journal *j, const Options &options) {
+  int err = 0;
+  if (options.start == TIME_BOOT) {
+    if (options.end == TIME_UNIX) {
+      err = sd_journal_seek_realtime_usec(j, options.end_sec * 1'000'000);
+      if (err != 0) {
+        return err;
+      }
+      err = sd_journal_previous(j);
+      if (err < 0) {
+        return err;
+      }
+      if (err == 0) {
+        // there are no entries before end_sec, which is awkward. it's safe to return 0 here,
+        // the subsequent seek to head and read forward will return no records before end_sec
+        // and the resulting MCAP will contain no entries.
+        return 0;
+      }
+      return match_current_entry_boot_id(j);
+      // select boot ID based on entry closest to end
+    } else {
+      sd_id128_t boot_id;
+      err = sd_id128_get_boot(&boot_id);
+      if (err != 0) {
+        return err;
+      }
+      // use a buffer big enough to fit a `_BOOT_ID=a0b1...` hex-encoded string. 
+      char boot_id_match[sizeof("_BOOT_ID=") + (sizeof(sd_id128_t) * 2)] = {0};
+      size_t len_written = snprintf(boot_id_match, sizeof(boot_id_match), "_BOOT_ID=" SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(boot_id));
+      assert(len_written < sizeof(boot_id_match));
+      return sd_journal_add_match(j, (const void*)boot_id_match, len_written);
+    }
+  } else if (options.end == TIME_SHUTDOWN && options.start == TIME_UNIX) {
+    // select boot ID based on entry closest to start
+    err = sd_journal_seek_realtime_usec(j, options.start_sec * 1'000'000);
+    if (err != 0) {
+      return err;
+    }
+    err = sd_journal_next(j);
+    if (err < 0) {
+      return err;
+    }
+    if (err == 0) {
+      // there are no entries after start_sec. this means the start time is in the current boot
+      // and recording will end before the next boot, so no need to apply a boot ID filter.
+      return 0;
+    }
+    return match_current_entry_boot_id(j);
+    // select boot ID based on entry closest to end
+  }
+  // in all other cases, no need to filter by boot ID.
   return 0;
 }
 
-int next_journal_entry(sd_journal *j, TimePoint end, uint64_t end_secs) {
+int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_sec) {
+  switch (start) {
+    case TIME_BOOT:
+      return sd_journal_seek_head(j);
+    case TIME_NOW:
+      return sd_journal_seek_tail(j);
+    case TIME_UNIX:
+      return sd_journal_seek_realtime_usec(j, start_sec * 1'000'000);
+    default:
+      assert(false); // no other valid start time points
+  }
+  return 0;
+}
+
+int next_journal_entry(sd_journal *j, TimePoint end, uint64_t end_sec, std::atomic_bool* signalled) {
+  int err = 0;
+  switch (end) {
+    case TIME_SHUTDOWN:
+    case TIME_NOW:
+      return sd_journal_next(j);
+    case TIME_WAIT:
+      // wait for the next entry
+      while (!*signalled) {
+        err = sd_journal_next(j);
+        if (err != 0) {
+          return err;
+        }
+        // there are no more entries in the journal right now, wait for more.
+        err = sd_journal_wait(j, 1'000'000);
+        // negative return indicates an error, bail out.
+        if (err < 0) {
+          return err;
+        }
+        // APPEND and INVALIDATE both indicate that new entries are available.
+        if (err == SD_JOURNAL_APPEND || err == SD_JOURNAL_INVALIDATE) {
+          return 1;
+        }
+        // NOP should be the only other possible return code. try waiting again.
+        assert(err == SD_JOURNAL_NOP);
+      }
+    case TIME_UNIX:
+    {
+      err = sd_journal_next(j);
+      // if there are no more entries or an error occurred, return.
+      if (err <= 0) {
+        return err;
+      }
+      uint64_t ts_usec = 0; 
+      err = sd_journal_get_realtime_usec(j, &ts_usec);
+      if (err != 0) {
+        return err;
+      }
+      // if this entry is after nend sec, return "no more entries"
+      if (ts_usec > (end_sec * 1'000'000)) {
+        return 0;
+      }
+      // otherwise, return "more entries".
+      return 1;
+    }
+    default:
+      assert(false); // no other valid time points for end
+  }
   return 0;
 }

@@ -1,6 +1,7 @@
 #ifndef JOURNAL_HPP
 #define JOURNAL_HPP
 #include <string>
+#include <atomic>
 
 #include <systemd/sd-journal.h>
 
@@ -38,6 +39,6 @@ int apply_boot_id_match(sd_journal *j, const Options& options);
 
 int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_secs);
 
-int next_journal_entry(sd_journal* j, TimePoint end, uint64_t end_secs);
+int next_journal_entry(sd_journal* j, TimePoint end, uint64_t end_secs, std::atomic_bool *signalled);
 
 #endif

@@ -1,5 +1,6 @@
 #include <sstream>
 #include <string_view>
+#include <signal.h>
 
 #include <systemd/sd-journal.h>
 
@@ -131,6 +132,14 @@ static const char *SCHEMA_TEXT = R"({
   }
 })";
 
+
+static std::atomic_bool global_signalled = false;
+
+void on_sigint(int signal) {
+  printf("Received signal, shutting down.\n");
+  global_signalled = true;
+}
+
 std::string get_topic(Transport transport) {
   std::stringstream ss;
   ss << "/journald/";
@@ -154,6 +163,10 @@ int main(int argc, const char **argv) {
   if (options.version) {
     printf("%s\n", VERSION);
     return 0;
+  }
+
+  if (options.end == TIME_WAIT) {
+    signal(SIGINT, on_sigint);
   }
 
   // seek to where recording will start
@@ -197,7 +210,7 @@ int main(int argc, const char **argv) {
     transport_channel_ids[i] = channel.id;
   }
 
-  int err = next_journal_entry(j, options.end, options.end_sec);
+  int err = next_journal_entry(j, options.end, options.end_sec, &global_signalled);
   while (err > 0) {
     uint64_t ts = 0;
     err = get_ts(j, &ts);
@@ -220,7 +233,7 @@ int main(int argc, const char **argv) {
       writer.close();
       return 1;
     }
-    err = next_journal_entry(j, options.end, options.end_sec);
+    err = next_journal_entry(j, options.end, options.end_sec, &global_signalled);
   }
   if (err < 0) {
     fprintf(stderr, "failed to read next entry: %s", strerror(-err));
@@ -228,5 +241,7 @@ int main(int argc, const char **argv) {
   }
   writer.close();
   sd_journal_close(j);
+  printf("finished\n");
+
   return 0;
 }
