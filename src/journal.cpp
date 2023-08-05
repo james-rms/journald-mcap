@@ -1,6 +1,5 @@
 #include "vendor/json.hpp"
 
-
 #include <systemd/sd-id128.h>
 
 #include "journal.hpp"
@@ -150,7 +149,7 @@ std::string serialize_json(sd_journal *j, uint64_t timestamp) {
 }
 
 int match_current_entry_boot_id(sd_journal *j) {
-  const void* data = NULL;
+  const void *data = NULL;
   size_t length = 0;
   int err = sd_journal_get_data(j, "_BOOT_ID", &data, &length);
   if (err != 0) {
@@ -172,9 +171,10 @@ int apply_boot_id_match(sd_journal *j, const Options &options) {
         return err;
       }
       if (err == 0) {
-        // there are no entries before end_sec, which is awkward. it's safe to return 0 here,
-        // the subsequent seek to head and read forward will return no records before end_sec
-        // and the resulting MCAP will contain no entries.
+        // there are no entries before end_sec, which is awkward. it's safe to
+        // return 0 here, the subsequent seek to head and read forward will
+        // return no records before end_sec and the resulting MCAP will contain
+        // no entries.
         return 0;
       }
       return match_current_entry_boot_id(j);
@@ -185,11 +185,13 @@ int apply_boot_id_match(sd_journal *j, const Options &options) {
       if (err != 0) {
         return err;
       }
-      // use a buffer big enough to fit a `_BOOT_ID=a0b1...` hex-encoded string. 
+      // use a buffer big enough to fit a `_BOOT_ID=a0b1...` hex-encoded string.
       char boot_id_match[sizeof("_BOOT_ID=") + (sizeof(sd_id128_t) * 2)] = {0};
-      size_t len_written = snprintf(boot_id_match, sizeof(boot_id_match), "_BOOT_ID=" SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(boot_id));
+      size_t len_written = snprintf(boot_id_match, sizeof(boot_id_match),
+                                    "_BOOT_ID=" SD_ID128_FORMAT_STR,
+                                    SD_ID128_FORMAT_VAL(boot_id));
       assert(len_written < sizeof(boot_id_match));
-      return sd_journal_add_match(j, (const void*)boot_id_match, len_written);
+      return sd_journal_add_match(j, (const void *)boot_id_match, len_written);
     }
   } else if (options.end == TIME_SHUTDOWN && options.start == TIME_UNIX) {
     // select boot ID based on entry closest to start
@@ -202,8 +204,9 @@ int apply_boot_id_match(sd_journal *j, const Options &options) {
       return err;
     }
     if (err == 0) {
-      // there are no entries after start_sec. this means the start time is in the current boot
-      // and recording will end before the next boot, so no need to apply a boot ID filter.
+      // there are no entries after start_sec. this means the start time is in
+      // the current boot and recording will end before the next boot, so no
+      // need to apply a boot ID filter.
       return 0;
     }
     return match_current_entry_boot_id(j);
@@ -215,14 +218,14 @@ int apply_boot_id_match(sd_journal *j, const Options &options) {
 
 int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_sec) {
   switch (start) {
-    case TIME_BOOT:
-      return sd_journal_seek_head(j);
-    case TIME_NOW:
-      return sd_journal_seek_tail(j);
-    case TIME_UNIX:
-      return sd_journal_seek_realtime_usec(j, start_sec * 1'000'000);
-    default:
-      assert(false); // no other valid start time points
+  case TIME_BOOT:
+    return sd_journal_seek_head(j);
+  case TIME_NOW:
+    return sd_journal_seek_tail(j);
+  case TIME_UNIX:
+    return sd_journal_seek_realtime_usec(j, start_sec * 1'000'000);
+  default:
+    assert(false); // no other valid start time points
   }
   return 0;
 }
@@ -230,31 +233,30 @@ int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_sec) {
 int next_journal_entry(sd_journal *j, TimePoint end, uint64_t end_sec) {
   int err = 0;
   switch (end) {
-    case TIME_SHUTDOWN:
-    case TIME_WAIT:
-    case TIME_NOW:
-      return sd_journal_next(j);
-    case TIME_UNIX:
-    {
-      err = sd_journal_next(j);
-      // if there are no more entries or an error occurred, return.
-      if (err <= 0) {
-        return err;
-      }
-      uint64_t ts_usec = 0; 
-      err = sd_journal_get_realtime_usec(j, &ts_usec);
-      if (err != 0) {
-        return err;
-      }
-      // if this entry is after end sec, return "no more entries"
-      if (ts_usec > (end_sec * 1'000'000)) {
-        return 0;
-      }
-      // otherwise, return "more entries".
-      return 1;
+  case TIME_SHUTDOWN:
+  case TIME_WAIT:
+  case TIME_NOW:
+    return sd_journal_next(j);
+  case TIME_UNIX: {
+    err = sd_journal_next(j);
+    // if there are no more entries or an error occurred, return.
+    if (err <= 0) {
+      return err;
     }
-    default:
-      assert(false); // no other valid time points for end
+    uint64_t ts_usec = 0;
+    err = sd_journal_get_realtime_usec(j, &ts_usec);
+    if (err != 0) {
+      return err;
+    }
+    // if this entry is after end sec, return "no more entries"
+    if (ts_usec > (end_sec * 1'000'000)) {
+      return 0;
+    }
+    // otherwise, return "more entries".
+    return 1;
+  }
+  default:
+    assert(false); // no other valid time points for end
   }
   return 0;
 }

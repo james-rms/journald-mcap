@@ -1,7 +1,7 @@
-#include <sstream>
-#include <string_view>
 #include <chrono>
 #include <signal.h>
+#include <sstream>
+#include <string_view>
 
 #include <systemd/sd-journal.h>
 
@@ -133,12 +133,9 @@ static const char *SCHEMA_TEXT = R"({
   }
 })";
 
-
 static std::atomic_bool global_signalled = false;
 
-void on_sigint(int signal) {
-  global_signalled = true;
-}
+void on_sigint(int signal) { global_signalled = true; }
 
 std::string get_topic(Transport transport) {
   std::stringstream ss;
@@ -220,7 +217,8 @@ int main(int argc, const char **argv) {
       if (options.end == TIME_WAIT) {
         err = sd_journal_wait(j, 100'000);
         if (err < 0) {
-          fprintf(stderr, "failed to wait for more entries: %s", strerror(-err));
+          fprintf(stderr, "failed to wait for more entries: %s",
+                  strerror(-err));
           writer.close();
           return -err;
         }

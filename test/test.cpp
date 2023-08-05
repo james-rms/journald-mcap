@@ -72,7 +72,7 @@ TEST_CASE("set string and int flag", "[cmdline]") {
 void test_get_ts(uint64_t expected, uint64_t actual_usec, int journald_rval,
                  int expected_rval) {
   sd_journal j;
-  j.entry_timestamps = { actual_usec };
+  j.entry_timestamps = {actual_usec};
   j.rval = journald_rval;
   uint64_t out = 0;
   REQUIRE(get_ts(&j, &out) == expected_rval);
@@ -223,9 +223,10 @@ TEST_CASE("sets debug file info", "[serialize_json]") {
 }
 
 TEST_CASE("uses current boot ID", "[apply_boot_id_match]") {
-  Options options { .start = TIME_BOOT, .end = TIME_NOW };
+  Options options{.start = TIME_BOOT, .end = TIME_NOW};
   sd_journal j;
   int ret = apply_boot_id_match(&j, options);
   REQUIRE(ret == 0);
-  REQUIRE(j.matches == std::vector<std::string>{ "_BOOT_ID=000102030405060708090a0b0c0d0e0f" });
+  REQUIRE(j.matches == std::vector<std::string>{
+                           "_BOOT_ID=000102030405060708090a0b0c0d0e0f"});
 }
