@@ -221,3 +221,11 @@ TEST_CASE("sets debug file info", "[serialize_json]") {
   })"_json,
       10000000050ull);
 }
+
+TEST_CASE("uses current boot ID", "[apply_boot_id_match]") {
+  Options options { .start = TIME_BOOT, .end = TIME_NOW };
+  sd_journal j;
+  int ret = apply_boot_id_match(&j, options);
+  REQUIRE(ret == 0);
+  REQUIRE(j.matches == std::vector<std::string>{ "_BOOT_ID=000102030405060708090a0b0c0d0e0f" });
+}

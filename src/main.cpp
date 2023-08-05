@@ -1,5 +1,6 @@
 #include <sstream>
 #include <string_view>
+#include <chrono>
 #include <signal.h>
 
 #include <systemd/sd-journal.h>
@@ -16,7 +17,7 @@ const char *DOC = R"(
 Utility for exporting journald logs to MCAP
 
 Usage:
-  journal2mcap [-o <filename>] [--start <arg>] [--end <arg>] [--verbose] [--help] [--version]
+  journal2mcap [--output <filename>] [--start <arg>] [--end <arg>] [--verbose] [--help] [--version]
 
 Flags:
   -o  --output
@@ -53,10 +54,10 @@ Exports logs starting from now and continues logging until Ctrl-C:
 Exports logs between from Jan 1 2023 and Feb 1 2023
   journal2mcap --start $(date -d 2023-01-01 +%s) --end $(date -d 2023-02-01 +%s)
 
-Exports logs between from midnight Jan 1 2023 until shutdown.
+Exports logs between from midnight Jan 1 2023 until the first shutdown after that.
   journal2mcap --start $(date -d 2023-01-01 +%s) --end shutdown
 
-Exports logs from the boot before midnight Mar 1 2023 until midnight Mar 1 2023.
+Exports logs from the last boot before midnight Mar 1 2023 until midnight Mar 1 2023.
   journal2mcap --end $(date -d 2023-03-01 +%s)
 )";
 
@@ -136,7 +137,6 @@ static const char *SCHEMA_TEXT = R"({
 static std::atomic_bool global_signalled = false;
 
 void on_sigint(int signal) {
-  printf("Received signal, shutting down.\n");
   global_signalled = true;
 }
 
@@ -168,30 +168,29 @@ int main(int argc, const char **argv) {
   if (options.end == TIME_WAIT) {
     signal(SIGINT, on_sigint);
   }
-
-  // seek to where recording will start
-  {
-    int err = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
-    if (err != 0) {
-      fprintf(stderr, "failed to open journal: %s\n", strerror(-err));
-      return -err;
-    }
-    err = apply_boot_id_match(j, options);
-    if (err != 0) {
-      return -err;
-    }
-    err = seek_to_start(j, options.start, options.start_sec);
-    if (err != 0) {
-      return -err;
-    }
+  // open the reader
+  int err = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
+  if (err != 0) {
+    fprintf(stderr, "failed to open journal: %s\n", strerror(-err));
+    return -err;
   }
-  {
-    auto writerOptions = mcap::McapWriterOptions("");
-    const auto res = writer.open(options.output_filename, writerOptions);
-    if (!res.ok()) {
-      fprintf(stderr, "open failed: %s\n", res.message.c_str());
-      return 1;
-    }
+  // filter by boot ID if neccessary
+  err = apply_boot_id_match(j, options);
+  if (err != 0) {
+    return -err;
+  }
+  // seek to where recording will start
+  err = seek_to_start(j, options.start, options.start_sec);
+  if (err != 0) {
+    return -err;
+  }
+
+  // set up the writer
+  auto writerOptions = mcap::McapWriterOptions("");
+  const auto res = writer.open(options.output_filename, writerOptions);
+  if (!res.ok()) {
+    fprintf(stderr, "open failed: %s\n", res.message.c_str());
+    return 1;
   }
   // write schema
   mcap::SchemaId schema_id;
@@ -210,12 +209,31 @@ int main(int argc, const char **argv) {
     transport_channel_ids[i] = channel.id;
   }
 
-  int err = next_journal_entry(j, options.end, options.end_sec, &global_signalled);
-  while (err > 0) {
+  while (!global_signalled) {
+    int err = next_journal_entry(j, options.end, options.end_sec);
+    if (err < 0) {
+      fprintf(stderr, "failed to read next entry: %s", strerror(-err));
+      writer.close();
+      return -err;
+    }
+    if (err == 0) {
+      if (options.end == TIME_WAIT) {
+        err = sd_journal_wait(j, 100'000);
+        if (err < 0) {
+          fprintf(stderr, "failed to wait for more entries: %s", strerror(-err));
+          writer.close();
+          return -err;
+        }
+        continue;
+      } else {
+        break;
+      }
+    }
     uint64_t ts = 0;
     err = get_ts(j, &ts);
     if (err != 0) {
       fprintf(stderr, "failed to read entry timestamp: %s\n", strerror(-err));
+      writer.close();
       return -err;
     }
     message.logTime = ts;
@@ -233,15 +251,9 @@ int main(int argc, const char **argv) {
       writer.close();
       return 1;
     }
-    err = next_journal_entry(j, options.end, options.end_sec, &global_signalled);
-  }
-  if (err < 0) {
-    fprintf(stderr, "failed to read next entry: %s", strerror(-err));
-    return -err;
   }
   writer.close();
   sd_journal_close(j);
-  printf("finished\n");
 
   return 0;
 }

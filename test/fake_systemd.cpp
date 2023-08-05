@@ -107,10 +107,6 @@ int sd_journal_add_match(sd_journal *j, const void* data, size_t len) {
   return 0;
 }
 
-int sd_journal_wait(sd_journal *j, uint64_t timeout_usec) {
-  (void)timeout_usec;
-  return SD_JOURNAL_APPEND;
-}
 
 int sd_id128_get_boot(sd_id128_t * out) {
   *out = SD_ID128_MAKE(00,01, 02, 03, 04, 05, 06, 07, 08, 09, 0a, 0b, 0c, 0d, 0e, 0f);

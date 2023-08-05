@@ -227,32 +227,13 @@ int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_sec) {
   return 0;
 }
 
-int next_journal_entry(sd_journal *j, TimePoint end, uint64_t end_sec, std::atomic_bool* signalled) {
+int next_journal_entry(sd_journal *j, TimePoint end, uint64_t end_sec) {
   int err = 0;
   switch (end) {
     case TIME_SHUTDOWN:
+    case TIME_WAIT:
     case TIME_NOW:
       return sd_journal_next(j);
-    case TIME_WAIT:
-      // wait for the next entry
-      while (!*signalled) {
-        err = sd_journal_next(j);
-        if (err != 0) {
-          return err;
-        }
-        // there are no more entries in the journal right now, wait for more.
-        err = sd_journal_wait(j, 1'000'000);
-        // negative return indicates an error, bail out.
-        if (err < 0) {
-          return err;
-        }
-        // APPEND and INVALIDATE both indicate that new entries are available.
-        if (err == SD_JOURNAL_APPEND || err == SD_JOURNAL_INVALIDATE) {
-          return 1;
-        }
-        // NOP should be the only other possible return code. try waiting again.
-        assert(err == SD_JOURNAL_NOP);
-      }
     case TIME_UNIX:
     {
       err = sd_journal_next(j);
@@ -265,7 +246,7 @@ int next_journal_entry(sd_journal *j, TimePoint end, uint64_t end_sec, std::atom
       if (err != 0) {
         return err;
       }
-      // if this entry is after nend sec, return "no more entries"
+      // if this entry is after end sec, return "no more entries"
       if (ts_usec > (end_sec * 1'000'000)) {
         return 0;
       }
