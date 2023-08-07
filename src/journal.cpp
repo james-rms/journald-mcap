@@ -231,14 +231,13 @@ int seek_to_start(sd_journal *j, TimePoint start, uint64_t start_sec) {
 }
 
 int next_journal_entry(sd_journal *j, TimePoint end, uint64_t end_sec) {
-  int err = 0;
   switch (end) {
   case TIME_SHUTDOWN:
   case TIME_WAIT:
   case TIME_NOW:
     return sd_journal_next(j);
   case TIME_UNIX: {
-    err = sd_journal_next(j);
+    int err = sd_journal_next(j);
     // if there are no more entries or an error occurred, return.
     if (err <= 0) {
       return err;
